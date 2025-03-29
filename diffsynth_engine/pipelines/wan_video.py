@@ -92,6 +92,7 @@ class WanVideoPipeline(BasePipeline):
         batch_cfg: bool = False,
         device="cuda",
         dtype=torch.bfloat16,
+        num_inference_steps : int = 40,
     ):
         super().__init__(device=device, dtype=dtype)
         self.noise_scheduler = RecifitedFlowScheduler(shift=5.0, sigma_min=0.001, sigma_max=0.999)
@@ -104,6 +105,7 @@ class WanVideoPipeline(BasePipeline):
         self.batch_cfg = batch_cfg
         self.config = config
         self.model_names = ["text_encoder", "dit", "vae"]
+        self.num_inference_steps = num_inference_steps
 
     def load_loras(self, lora_list: List[Tuple[str, float]], fused: bool = True, save_original_weight: bool = False):
         for lora_path, lora_scale in lora_list:
@@ -295,15 +297,14 @@ class WanVideoPipeline(BasePipeline):
         latents,
         input_video,
         denoising_strength,
-        num_inference_steps,
         tiled=True,
         tile_size=(34, 34),
         tile_stride=(18, 16),
     ):
         if input_video is not None:
-            total_steps = num_inference_steps
+            total_steps = self.num_inference_steps
             sigmas, timesteps = self.noise_scheduler.schedule(total_steps)
-            t_start = max(total_steps - int(num_inference_steps * denoising_strength), 1)
+            t_start = max(total_steps - int(self.num_inference_steps * denoising_strength), 1)
             sigma_start, sigmas = sigmas[t_start - 1], sigmas[t_start - 1 :]
             timesteps = timesteps[t_start - 1 :]
 
@@ -316,7 +317,7 @@ class WanVideoPipeline(BasePipeline):
             init_latents = latents.clone()
             latents = self.sampler.add_noise(latents, noise, sigma_start)
         else:
-            sigmas, timesteps = self.noise_scheduler.schedule(num_inference_steps)
+            sigmas, timesteps = self.noise_scheduler.schedule(self.num_inference_steps)
             init_latents = latents.clone()
 
         return init_latents, latents, sigmas, timesteps
@@ -334,7 +335,6 @@ class WanVideoPipeline(BasePipeline):
         width=832,
         num_frames=81,
         cfg_scale=5.0,
-        num_inference_steps=50,
         tiled=True,
         tile_size=(34, 34),
         tile_stride=(18, 16),
@@ -352,7 +352,6 @@ class WanVideoPipeline(BasePipeline):
             noise,
             input_video,
             denoising_strength,
-            num_inference_steps,
             tiled=tiled,
             tile_size=tile_size,
             tile_stride=tile_stride,
@@ -409,6 +408,8 @@ class WanVideoPipeline(BasePipeline):
         offload_mode: str | None = None,
         parallelism: int = 1,
         use_cfg_parallel: bool = False,
+        num_inference_steps: int = 40,
+        teacache_thresh: float = 0.2,
     ) -> "WanVideoPipeline":
         cls.validate_offload_mode(offload_mode)
 
@@ -477,6 +478,8 @@ class WanVideoPipeline(BasePipeline):
                 model_type=model_type,
                 device="cpu",
                 dtype=model_config.dit_dtype,
+                num_inference_steps=num_inference_steps,
+                teacache_thresh=teacache_thresh,
             )
             dit = ParallelModel(
                 dit,
@@ -492,6 +495,8 @@ class WanVideoPipeline(BasePipeline):
                     model_type=model_type,
                     device=init_device,
                     dtype=model_config.dit_dtype,
+                    num_inference_steps=num_inference_steps,
+                    teacache_thresh=teacache_thresh,
                 )
 
         pipe = cls(
@@ -504,6 +509,7 @@ class WanVideoPipeline(BasePipeline):
             batch_cfg=batch_cfg,
             device=device,
             dtype=dtype,
+            num_inference_steps=num_inference_steps,
         )
         pipe.eval()
         if offload_mode == "cpu_offload":

@@ -3,6 +3,7 @@ import json
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import numpy as np
 from typing import Dict, Tuple, Optional
 from einops import rearrange
 
@@ -347,10 +348,64 @@ class WanDiT(PreTrainedModel):
             .reshape(f * h * w, 1, -1)
             .to(x.device)
         )
-        for block in self.blocks:
-            x = block(x, context, t_mod, freqs)
+
+        # https://github.com/ali-vilab/TeaCache
+        modulated_input = t_mod if self.use_ref_steps else t
+        if self.cnt % 2 == 0:  # Even -> Conditional
+            self.is_even = True
+            if self.cnt < self.ret_steps or self.cnt >= self.cutoff_steps:
+                    should_calc_even = True
+                    self.accumulated_rel_l1_distance_even = 0
+            else:
+                rescale_func = np.poly1d(self.coefficients)
+                self.accumulated_rel_l1_distance_even += rescale_func(((modulated_input - self.previous_e0_even).abs().mean() / self.previous_e0_even.abs().mean()).cpu().item())
+                if self.accumulated_rel_l1_distance_even < self.teacache_thresh:
+                    should_calc_even = False
+                else:
+                    should_calc_even = True
+                    self.accumulated_rel_l1_distance_even = 0
+            self.previous_e0_even = modulated_input.clone()
+
+        else:  # Odd -> Unconditional
+            self.is_even = False
+            if self.cnt < self.ret_steps or self.cnt >= self.cutoff_steps:
+                    should_calc_odd = True
+                    self.accumulated_rel_l1_distance_odd = 0
+            else:
+                rescale_func = np.poly1d(self.coefficients)
+                self.accumulated_rel_l1_distance_odd += rescale_func(((modulated_input - self.previous_e0_odd).abs().mean() / self.previous_e0_odd.abs().mean()).cpu().item())
+                if self.accumulated_rel_l1_distance_odd < self.teacache_thresh:
+                    should_calc_odd = False
+                else:
+                    should_calc_odd = True
+                    self.accumulated_rel_l1_distance_odd = 0
+            self.previous_e0_odd = modulated_input.clone()
+
+        if self.is_even:
+            if not should_calc_even:
+                x += self.previous_residual_even
+            else:
+                ori_x = x.clone()
+                for block in self.blocks:
+                    x = block(x, context, t_mod, freqs)
+                self.previous_residual_even = x - ori_x
+        else:
+            if not should_calc_odd:
+                x += self.previous_residual_odd
+            else:
+                ori_x = x.clone()
+                for block in self.blocks:
+                    x = block(x, context, t_mod, freqs)
+                self.previous_residual_odd = x - ori_x
+        #
+
         x = self.head(x, t)
         x = self.unpatchify(x, (f, h, w))
+
+        self.cnt += 1
+        if self.cnt >= self.num_steps:
+            self.cnt = 0
+
         return x
 
     @classmethod
@@ -359,6 +414,8 @@ class WanDiT(PreTrainedModel):
         state_dict: Dict[str, torch.Tensor],
         device: str,
         dtype: torch.dtype,
+        num_inference_steps: int,
+        teacache_thresh: float,
         model_type: str = "1.3b-t2v",
     ):
         if model_type == "1.3b-t2v":
@@ -373,6 +430,25 @@ class WanDiT(PreTrainedModel):
             model = torch.nn.utils.skip_init(cls, **config, device=device, dtype=dtype)
         model.load_state_dict(state_dict, assign=True)
         model.to(device=device, dtype=dtype, non_blocking=True)
+
+        # Initialize TeaCache
+        model.__class__.cnt = 0
+        model.__class__.num_steps = num_inference_steps * 2
+        model.__class__.teacache_thresh = teacache_thresh
+        model.__class__.accumulated_rel_l1_distance_even = 0
+        model.__class__.accumulated_rel_l1_distance_odd = 0
+        model.__class__.previous_e0_even = None
+        model.__class__.previous_e0_odd = None
+        model.__class__.previous_residual_even = None
+        model.__class__.previous_residual_odd = None
+        model.__class__.use_ref_steps = True
+        if model_type == "14b-t2v":
+            model.__class__.coefficients = [-3.03318725e+05, 4.90537029e+04, -2.65530556e+03, 5.87365115e+01, -3.15583525e-01]  # 480P
+        elif model_type == "14b-i2v":
+            model.__class__.coefficients = [ 2.57151496e+05, -3.54229917e+04,  1.40286849e+03, -1.35890334e+01, 1.32517977e-01]  # 480P
+        model.__class__.ret_steps = 5 * 2
+        model.__class__.cutoff_steps = model.__class__.num_steps
+
         return model
 
     def get_tp_plan(self):
