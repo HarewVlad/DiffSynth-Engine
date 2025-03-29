@@ -56,26 +56,39 @@ class WanModelConfig:
 
 
 class WanLoRAConverter(LoRAStateDictConverter):
-    def from_modelscope(self, state_dict):
+    def from_diffusion(self, state_dict):
         dit_dict = {}
         for key, param in state_dict.items():
             lora_args = {}
-            if ".lora_A.default.weight" not in key:
+            if ".lora_A.weight" not in key:
                 continue
 
-            lora_args["up"] = state_dict[key.replace(".lora_A.default.weight", ".lora_B.default.weight")]
+            lora_b_key = key.replace(".lora_A.weight", ".lora_B.weight")
+            if lora_b_key not in state_dict:
+                continue
+
             lora_args["down"] = param
+            lora_args["up"] = state_dict[lora_b_key]
             lora_args["rank"] = lora_args["up"].shape[1]
-            if key.replace(".lora_A.default.weight", ".alpha") in state_dict:
-                lora_args["alpha"] = state_dict[key.replace(".lora_A.default.weight", ".alpha")]
+
+            # Check for alpha, use rank as default
+            alpha_key = key.replace(".lora_A.weight", ".alpha")
+            if alpha_key in state_dict:
+                lora_args["alpha"] = state_dict[alpha_key]
             else:
                 lora_args["alpha"] = lora_args["rank"]
-            key = key.replace(".lora_A.default.weight", "")
-            dit_dict[key] = lora_args
+
+            # Extract the base key without the lora suffix and remove diffusion_model prefix
+            base_key = key.replace(".lora_A.weight", "")
+            if base_key.startswith("diffusion_model."):
+                base_key = base_key[len("diffusion_model."):]
+
+            dit_dict[base_key] = lora_args
+
         return {"dit": dit_dict}
 
     def convert(self, state_dict):
-        return self.from_modelscope(state_dict)
+        return self.from_diffusion(state_dict)
 
 
 class WanVideoPipeline(BasePipeline):
@@ -109,7 +122,7 @@ class WanVideoPipeline(BasePipeline):
 
     def load_loras(self, lora_list: List[Tuple[str, float]], fused: bool = True, save_original_weight: bool = False):
         for lora_path, lora_scale in lora_list:
-            logger.info(f"loading lora from {lora_path} with scale {lora_scale}")
+            logger.info(f"Loading lora from {lora_path} with scale {lora_scale}")
             state_dict = load_file(lora_path, device="cpu")
             lora_state_dict = self.lora_converter.convert(state_dict)
             for model_name, state_dict in lora_state_dict.items():
