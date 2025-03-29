@@ -357,6 +357,7 @@ class WanVideoPipeline(BasePipeline):
             tile_stride=tile_stride,
         )
         self.sampler.initialize(init_latents=init_latents, timesteps=timesteps, sigmas=sigmas)
+
         # Encode prompts
         self.load_models_to_device(["text_encoder"])
         prompt_emb_posi = self.encode_prompt(prompt)
@@ -418,20 +419,13 @@ class WanVideoPipeline(BasePipeline):
         else:
             model_config = model_path_or_config
 
-        if model_config.model_path is None:
-            model_config.model_path = fetch_model("MusePublic/wan2.1-1.3b", path="dit.safetensors")
-        if model_config.t5_path is None:
-            model_config.t5_path = fetch_model("muse/wan2.1-umt5", path="umt5.safetensors")
-        if model_config.vae_path is None:
-            model_config.vae_path = fetch_model("muse/wan2.1-vae", path="vae.safetensors")
-
-        logger.info(f"loading state dict from {model_config.model_path} ...")
+        logger.info(f"Loading state dict from {model_config.model_path} ...")
         dit_state_dict = cls.load_model_checkpoint(model_config.model_path, device="cpu", dtype=model_config.dit_dtype)
 
-        logger.info(f"loading state dict from {model_config.t5_path} ...")
+        logger.info(f"Loading state dict from {model_config.t5_path} ...")
         t5_state_dict = cls.load_model_checkpoint(model_config.t5_path, device="cpu", dtype=model_config.t5_dtype)
 
-        logger.info(f"loading state dict from {model_config.vae_path} ...")
+        logger.info(f"Loading state dict from {model_config.vae_path} ...")
         vae_state_dict = cls.load_model_checkpoint(model_config.vae_path, device="cpu", dtype=model_config.vae_dtype)
 
         init_device = "cpu" if offload_mode else device
@@ -442,7 +436,7 @@ class WanVideoPipeline(BasePipeline):
 
         image_encoder = None
         if model_config.image_encoder_path is not None:
-            logger.info(f"loading state dict from {model_config.image_encoder_path} ...")
+            logger.info(f"Loading state dict from {model_config.image_encoder_path} ...")
             image_encoder_state_dict = cls.load_model_checkpoint(
                 model_config.image_encoder_path,
                 device="cpu",
@@ -454,7 +448,7 @@ class WanVideoPipeline(BasePipeline):
                 dtype=model_config.image_encoder_dtype,
             )
 
-        # determine wan video model type by dit params
+        # Determine wan video model type by dit params
         model_type = None
         if "blocks.39.self_attn.norm_q.weight" in dit_state_dict:
             if image_encoder is not None:
