@@ -49,7 +49,7 @@ class WanModelConfig:
     t5_path: Optional[str] = None
     image_encoder_path: Optional[str] = None
 
-    vae_dtype: torch.dtype = torch.bfloat16
+    vae_dtype: torch.dtype = torch.float32
     dit_dtype: torch.dtype = torch.bfloat16
     t5_dtype: torch.dtype = torch.bfloat16
     image_encoder_dtype: torch.dtype = torch.bfloat16
