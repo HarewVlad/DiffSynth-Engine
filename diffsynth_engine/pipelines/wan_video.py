@@ -26,6 +26,22 @@ from diffsynth_engine.utils.parallel import ParallelModel
 logger = logging.getLogger(__name__)
 
 
+# https://github.com/WeichenFan/CFG-Zero-star
+def optimized_scale(positive_flat, negative_flat):
+
+    # Calculate dot production
+    dot_product = torch.sum(positive_flat * negative_flat, dim=1, keepdim=True)
+
+    # Squared norm of uncondition
+    squared_norm = torch.sum(negative_flat ** 2, dim=1, keepdim=True) + 1e-8
+
+    # st_star = v_cond^T * v_uncond / ||v_uncond||^2
+    st_star = dot_product / squared_norm
+
+    return st_star
+#
+
+
 @dataclass
 class WanModelConfig:
     model_path: Optional[str] = None
@@ -33,7 +49,7 @@ class WanModelConfig:
     t5_path: Optional[str] = None
     image_encoder_path: Optional[str] = None
 
-    vae_dtype: torch.dtype = torch.float32
+    vae_dtype: torch.dtype = torch.bfloat16
     dit_dtype: torch.dtype = torch.bfloat16
     t5_dtype: torch.dtype = torch.bfloat16
     image_encoder_dtype: torch.dtype = torch.bfloat16
@@ -202,6 +218,7 @@ class WanVideoPipeline(BasePipeline):
         negative_prompt_emb: torch.Tensor,
         cfg_scale: float,
         batch_cfg: bool,
+        use_cfg_zero_star: bool,
     ):
         if cfg_scale <= 1.0:
             return self.predict_noise(
@@ -245,6 +262,19 @@ class WanVideoPipeline(BasePipeline):
                 timestep=timestep,
                 context=prompt_emb,
             )
+            # https://github.com/WeichenFan/CFG-Zero-star
+            if use_cfg_zero_star:
+                positive_flat = positive_noise_pred.view(1, -1)
+                negative_flat = negative_noise_pred.view(1, -1)
+
+                alpha = optimized_scale(positive_flat, negative_flat)
+                alpha = alpha.view(1, 1, 1, 1)
+
+                if (i <= cfg_zero_steps):
+                    positive_noise_pred = positive_noise_pred * 0.
+                else:
+                    negative_noise_pred *= alpha
+            #
             noise_pred = negative_noise_pred + cfg_scale * (positive_noise_pred - negative_noise_pred)
             return noise_pred
 
@@ -308,6 +338,7 @@ class WanVideoPipeline(BasePipeline):
         tiled=True,
         tile_size=(34, 34),
         tile_stride=(18, 16),
+        use_cfg_zero_star=True,
         progress_callback: Optional[Callable] = None,  # def progress_callback(current, total, status)
     ):
         assert height % 16 == 0 and width % 16 == 0, "height and width must be divisible by 16"
@@ -353,6 +384,7 @@ class WanVideoPipeline(BasePipeline):
                 image_y=image_y,
                 cfg_scale=cfg_scale,
                 batch_cfg=self.batch_cfg,
+                use_cfg_zero_star=use_cfg_zero_star,
             )
             # Scheduler
             latents = self.sampler.step(latents, noise_pred, i)

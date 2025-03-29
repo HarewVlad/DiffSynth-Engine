@@ -19,9 +19,8 @@ def attention(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, num_heads: int)
     q, k, v = (rearrange(t, "b s (n d) -> b n s d ", n=num_heads) for t in (q, k, v))
 
     from sageattention import sageattn
-    F.scaled_dot_product_attention = sageattn
 
-    x = F.scaled_dot_product_attention(q, k, v)
+    x = sageattn(q, k, v)
     x = rearrange(x, "b n s d -> b s (n d)", n=num_heads)
     return x
 
