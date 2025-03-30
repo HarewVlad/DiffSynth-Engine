@@ -508,6 +508,7 @@ class WanVideoPipeline(BasePipeline):
                     num_inference_steps=num_inference_steps,
                     teacache_thresh=teacache_thresh,
                 )
+                # dit = torch.compile(dit)  # -20s
 
         pipe = cls(
             config=model_config,
