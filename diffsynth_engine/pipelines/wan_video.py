@@ -22,6 +22,8 @@ from diffsynth_engine.utils.download import fetch_model
 from diffsynth_engine.utils.loader import load_file
 from diffsynth_engine.utils.parallel import ParallelModel
 
+from transformer_engine import pytorch as te
+
 
 logger = logging.getLogger(__name__)
 
@@ -296,13 +298,14 @@ class WanVideoPipeline(BasePipeline):
     def predict_noise(self, latents, image_clip_feature, image_y, timestep, context):
         latents = latents.to(dtype=self.config.dit_dtype, device=self.device)
 
-        noise_pred = self.dit(
-            x=latents,
-            timestep=timestep,
-            context=context,
-            clip_feature=image_clip_feature,
-            y=image_y,
-        )
+        with te.fp8_autocast(enabled=True):
+            noise_pred = self.dit(
+                x=latents,
+                timestep=timestep,
+                context=context,
+                clip_feature=image_clip_feature,
+                y=image_y,
+            )
         return noise_pred
 
     def prepare_latents(
