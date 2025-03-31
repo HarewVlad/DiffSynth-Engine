@@ -108,9 +108,10 @@ class WanVideoPipeline(BasePipeline):
         device="cuda",
         dtype=torch.bfloat16,
         num_inference_steps : int = 40,
+        shift: float = 5.0,
     ):
         super().__init__(device=device, dtype=dtype)
-        self.noise_scheduler = RecifitedFlowScheduler(shift=5.0, sigma_min=0.001, sigma_max=0.999)
+        self.noise_scheduler = RecifitedFlowScheduler(shift=shift, sigma_min=0.001, sigma_max=0.999)
         self.sampler = FlowMatchEulerSampler()
         self.tokenizer = tokenizer
         self.text_encoder = text_encoder
@@ -360,6 +361,18 @@ class WanVideoPipeline(BasePipeline):
         assert height % 16 == 0 and width % 16 == 0, "height and width must be divisible by 16"
         assert (num_frames - 1) % 4 == 0, "num_frames must be 4X+1"
 
+        # Adjust aspect ratio
+        if input_image is not None:
+            max_area = width * height
+            w, h = input_image.size
+            aspect_ratio = h / w
+            lat_h = round(
+                np.sqrt(max_area * aspect_ratio) // 8 // 4)
+            lat_w = round(
+                np.sqrt(max_area / aspect_ratio) // 8 // 4)
+            height = lat_h * 8 * 4
+            width = lat_w * 8 * 4
+
         # Initialize noise
         noise = self.generate_noise(
             (1, 16, (num_frames - 1) // 4 + 1, height // 8, width // 8), seed=seed, device="cpu", dtype=torch.float32
@@ -427,6 +440,7 @@ class WanVideoPipeline(BasePipeline):
         use_cfg_parallel: bool = False,
         num_inference_steps: int = 40,
         teacache_thresh: float = 0.2,
+        shift: float = 5.0,
     ) -> "WanVideoPipeline":
         cls.validate_offload_mode(offload_mode)
 
@@ -521,6 +535,7 @@ class WanVideoPipeline(BasePipeline):
             device=device,
             dtype=dtype,
             num_inference_steps=num_inference_steps,
+            shift=shift,
         )
         pipe.eval()
         if offload_mode == "cpu_offload":
