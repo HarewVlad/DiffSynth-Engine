@@ -38,7 +38,7 @@ def fp8_inference(enabled=True):
         if len(input.shape) > 2:
             origin_shape = input.shape
             input = input.reshape(-1, origin_shape[-1])
-            result = torch._scaled_mm(
+            scaled_mm_result = torch._scaled_mm(
                 input,
                 weight.T,
                 scale_a=torch.tensor(1.0).to(device=device),
@@ -46,10 +46,17 @@ def fp8_inference(enabled=True):
                 bias=bias,
                 out_dtype=origin_dtype,
             )
+
+            # Extract the actual tensor from the tuple
+            if isinstance(scaled_mm_result, tuple):
+                result = scaled_mm_result[0]
+            else:
+                result = scaled_mm_result
+
             new_shape = origin_shape[:-1] + result.shape[-1:]
             result = result.reshape(new_shape)
         else:
-            result = torch._scaled_mm(
+            scaled_mm_result = torch._scaled_mm(
                 input,
                 weight.T,
                 scale_a=torch.tensor(1.0).to(device=device),
@@ -57,6 +64,13 @@ def fp8_inference(enabled=True):
                 bias=bias,
                 out_dtype=origin_dtype,
             )
+
+            # Extract the actual tensor from the tuple
+            if isinstance(scaled_mm_result, tuple):
+                result = scaled_mm_result[0]
+            else:
+                result = scaled_mm_result
+
         return result
 
     F.linear = fp8_linear

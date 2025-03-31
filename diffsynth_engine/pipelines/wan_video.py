@@ -21,8 +21,7 @@ from diffsynth_engine.utils.constants import WAN_TOKENIZER_CONF_PATH
 from diffsynth_engine.utils.download import fetch_model
 from diffsynth_engine.utils.loader import load_file
 from diffsynth_engine.utils.parallel import ParallelModel
-
-from transformer_engine import pytorch as te
+from diffsynth_engine.utils.fp8_linear import fp8_inference
 
 
 logger = logging.getLogger(__name__)
@@ -299,7 +298,7 @@ class WanVideoPipeline(BasePipeline):
     def predict_noise(self, latents, image_clip_feature, image_y, timestep, context):
         latents = latents.to(dtype=self.config.dit_dtype, device=self.device)
 
-        with te.fp8_autocast(enabled=True):
+        with fp8_inference():
             noise_pred = self.dit(
                 x=latents,
                 timestep=timestep,

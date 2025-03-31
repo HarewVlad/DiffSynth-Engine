@@ -15,8 +15,6 @@ from diffsynth_engine.utils.constants import (
     WAN_DIT_14B_T2V_CONFIG_FILE,
 )
 
-from transformer_engine import pytorch as te
-
 
 def attention(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, num_heads: int):
     q, k, v = (rearrange(t, "b s (n d) -> b n s d ", n=num_heads) for t in (q, k, v))
@@ -97,10 +95,10 @@ class SelfAttention(nn.Module):
         self.dim = dim
         self.head_dim = dim // num_heads
 
-        self.q = te.Linear(dim, dim, device=device)
-        self.k = te.Linear(dim, dim, device=device)
-        self.v = te.Linear(dim, dim, device=device)
-        self.o = te.Linear(dim, dim, device=device)
+        self.q = nn.Linear(dim, dim, device=device, dtype=dtype)
+        self.k = nn.Linear(dim, dim, device=device, dtype=dtype)
+        self.v = nn.Linear(dim, dim, device=device, dtype=dtype)
+        self.o = nn.Linear(dim, dim, device=device, dtype=dtype)
         self.norm_q = RMSNorm(dim, eps=eps, device=device, dtype=dtype)
         self.norm_k = RMSNorm(dim, eps=eps, device=device, dtype=dtype)
 
@@ -127,10 +125,10 @@ class CrossAttention(nn.Module):
         self.dim = dim
         self.head_dim = dim // num_heads
 
-        self.q = te.Linear(dim, dim, device=device)
-        self.k = te.Linear(dim, dim, device=device)
-        self.v = te.Linear(dim, dim, device=device)
-        self.o = te.Linear(dim, dim, device=device)
+        self.q = nn.Linear(dim, dim, device=device, dtype=dtype)
+        self.k = nn.Linear(dim, dim, device=device, dtype=dtype)
+        self.v = nn.Linear(dim, dim, device=device, dtype=dtype)
+        self.o = nn.Linear(dim, dim, device=device, dtype=dtype)
         self.norm_q = RMSNorm(dim, eps=eps, device=device, dtype=dtype)
         self.norm_k = RMSNorm(dim, eps=eps, device=device, dtype=dtype)
         self.has_image_input = has_image_input
@@ -182,9 +180,9 @@ class DiTBlock(nn.Module):
         self.norm2 = nn.LayerNorm(dim, eps=eps, elementwise_affine=False, device=device, dtype=dtype)
         self.norm3 = nn.LayerNorm(dim, eps=eps, device=device, dtype=dtype)
         self.ffn = nn.Sequential(
-            te.Linear(dim, ffn_dim, device=device),
+            nn.Linear(dim, ffn_dim, device=device, dtype=dtype),
             nn.GELU(approximate="tanh"),
-            te.Linear(ffn_dim, dim, device=device),
+            nn.Linear(ffn_dim, dim, device=device, dtype=dtype),
         )
         self.modulation = nn.Parameter(torch.randn(1, 6, dim, device=device, dtype=dtype) / dim**0.5)
 
@@ -234,7 +232,7 @@ class Head(nn.Module):
         self.dim = dim
         self.patch_size = patch_size
         self.norm = nn.LayerNorm(dim, eps=eps, elementwise_affine=False, device=device, dtype=dtype)
-        self.head = te.Linear(dim, out_dim * math.prod(patch_size), device=device)
+        self.head = nn.Linear(dim, out_dim * math.prod(patch_size), device=device, dtype=dtype)
         self.modulation = nn.Parameter(torch.randn(1, 2, dim, device=device, dtype=dtype) / dim**0.5)
 
     def forward(self, x, t_mod):
@@ -278,9 +276,9 @@ class WanDiT(PreTrainedModel):
             in_dim, dim, kernel_size=patch_size, stride=patch_size, device=device, dtype=dtype
         )
         self.text_embedding = nn.Sequential(
-            te.Linear(text_dim, dim, device=device),
+            nn.Linear(text_dim, dim, device=device, dtype=dtype),
             nn.GELU(approximate="tanh"),
-            te.Linear(dim, dim, device=device),
+            nn.Linear(dim, dim, device=device, dtype=dtype),
         )
         self.time_embedding = nn.Sequential(
             nn.Linear(freq_dim, dim, device=device, dtype=dtype),

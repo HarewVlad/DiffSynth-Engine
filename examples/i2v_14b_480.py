@@ -16,9 +16,9 @@ height = 480
 num_inference_steps = 40
 num_frames = 81
 teacache_thresh = 0.3
-cfg_scale = 5
+cfg_scale = 6
 
-pipe = WanVideoPipeline.from_pretrained(config, device="cuda", num_inference_steps=num_inference_steps, teacache_thresh=teacache_thresh, shift=3.0)
+pipe = WanVideoPipeline.from_pretrained(config, device="cuda", num_inference_steps=num_inference_steps, teacache_thresh=teacache_thresh, shift=5.0)
 pipe.load_lora(lora_path="/root/squish_18.safetensors", lora_scale=1.0)
 
 input_image = Image.open("/root/Wan2.1-I2V-14B-480P/examples/i2v_input.JPG")
