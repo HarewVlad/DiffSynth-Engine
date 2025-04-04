@@ -236,6 +236,7 @@ class WanVideoPipeline(BasePipeline):
         cfg_scale: float,
         batch_cfg: bool,
         use_cfg_zero_star: bool,
+        slg_layers: list[int],
     ):
         if cfg_scale <= 1.0:
             return self.predict_noise(
@@ -260,6 +261,7 @@ class WanVideoPipeline(BasePipeline):
                 image_y=image_y,
                 timestep=timestep,
                 context=negative_prompt_emb,
+                slg_layers=slg_layers,
             )
             noise_pred = negative_noise_pred + cfg_scale * (positive_noise_pred - negative_noise_pred)
             return noise_pred
@@ -295,7 +297,7 @@ class WanVideoPipeline(BasePipeline):
             noise_pred = negative_noise_pred + cfg_scale * (positive_noise_pred - negative_noise_pred)
             return noise_pred
 
-    def predict_noise(self, latents, image_clip_feature, image_y, timestep, context):
+    def predict_noise(self, latents, image_clip_feature, image_y, timestep, context, slg_layers = []):
         latents = latents.to(dtype=self.config.dit_dtype, device=self.device)
 
         with fp8_inference():
@@ -305,6 +307,7 @@ class WanVideoPipeline(BasePipeline):
                 context=context,
                 clip_feature=image_clip_feature,
                 y=image_y,
+                slg_layers=slg_layers,
             )
         return noise_pred
 
@@ -355,6 +358,9 @@ class WanVideoPipeline(BasePipeline):
         tile_size=(34, 34),
         tile_stride=(18, 16),
         use_cfg_zero_star=True,
+        slg_layers="",
+        slg_start=0.0,
+        slg_end=1.0,
         progress_callback: Optional[Callable] = None,  # def progress_callback(current, total, status)
     ):
         assert height % 16 == 0 and width % 16 == 0, "height and width must be divisible by 16"
@@ -401,6 +407,11 @@ class WanVideoPipeline(BasePipeline):
         # Denoise
         self.load_models_to_device(["dit"])
         for i, timestep in enumerate(tqdm(timesteps)):
+            current_slg_layers = []
+            if slg_layers:
+                if int(slg_start * self.num_inference_steps) <= i < int(slg_end * self.num_inference_steps):
+                    current_slg_layers = [int(x) for x in slg_layers.split(",")]
+
             timestep = timestep.unsqueeze(0).to(dtype=self.config.dit_dtype, device=self.device)
             # Classifier-free guidance
             noise_pred = self.predict_noise_with_cfg(
@@ -413,6 +424,7 @@ class WanVideoPipeline(BasePipeline):
                 cfg_scale=cfg_scale,
                 batch_cfg=self.batch_cfg,
                 use_cfg_zero_star=use_cfg_zero_star,
+                slg_layers=current_slg_layers,
             )
             # Scheduler
             latents = self.sampler.step(latents, noise_pred, i)

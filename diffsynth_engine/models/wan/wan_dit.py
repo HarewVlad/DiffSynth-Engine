@@ -327,6 +327,7 @@ class WanDiT(PreTrainedModel):
         timestep: torch.Tensor,
         clip_feature: Optional[torch.Tensor] = None,  # clip_vision_encoder(img)
         y: Optional[torch.Tensor] = None,  # vae_encoder(img)
+        slg_layers: Optional[list[int]] = [],
     ):
         t = self.time_embedding(sinusoidal_embedding_1d(self.freq_dim, timestep))
         t_mod = self.time_projection(t).unflatten(1, (6, self.dim))
@@ -386,7 +387,9 @@ class WanDiT(PreTrainedModel):
                 x += self.previous_residual_even
             else:
                 ori_x = x.clone()
-                for block in self.blocks:
+                for block_idx, block in enumerate(self.blocks):
+                    if block_idx in self.slg_layers:
+                        continue
                     x = block(x, context, t_mod, freqs)
                 self.previous_residual_even = x - ori_x
         else:
@@ -394,7 +397,9 @@ class WanDiT(PreTrainedModel):
                 x += self.previous_residual_odd
             else:
                 ori_x = x.clone()
-                for block in self.blocks:
+                for block_idx, block in enumerate(self.blocks):
+                    if block_idx in self.slg_layers:
+                        continue
                     x = block(x, context, t_mod, freqs)
                 self.previous_residual_odd = x - ori_x
         #

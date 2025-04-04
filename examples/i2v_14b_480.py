@@ -32,6 +32,7 @@ video = pipe(
     use_cfg_zero_star=True,
     input_image=input_image,
     cfg_scale=cfg_scale,
+    slg_layers="9",
 )
 
 save_video(video, "video.mp4")

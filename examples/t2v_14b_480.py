@@ -23,5 +23,6 @@ video = pipe(
     width=width,
     height=height,
     use_cfg_zero_star=True,
+    slg_layers="9",
 )
 save_video(video, "video.mp4")
