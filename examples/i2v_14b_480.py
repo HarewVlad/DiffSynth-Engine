@@ -19,9 +19,9 @@ teacache_thresh = 0.3
 cfg_scale = 6
 
 pipe = WanVideoPipeline.from_pretrained(config, device="cuda", num_inference_steps=num_inference_steps, teacache_thresh=teacache_thresh, shift=5.0)
-pipe.load_lora(lora_path="/root/squish_18.safetensors", lora_scale=1.0)
+# pipe.load_lora(lora_path="/root/squish_18.safetensors", lora_scale=1.0)
 
-input_image = Image.open("/root/Wan2.1-I2V-14B-480P/examples/i2v_input.JPG")
+input_image = Image.open("DiffSynth-Engine/assets/showcase.jpeg")
 
 video = pipe(
     prompt="In the video, a miniature cat is presented. The cat is held in a person’s hands. The person then presses on the cat, causing a sq41sh squish effect. The person keeps pressing down on the cat, further showing the sq41sh squish effect.",

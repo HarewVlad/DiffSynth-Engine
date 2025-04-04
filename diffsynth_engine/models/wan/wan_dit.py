@@ -388,7 +388,7 @@ class WanDiT(PreTrainedModel):
             else:
                 ori_x = x.clone()
                 for block_idx, block in enumerate(self.blocks):
-                    if block_idx in self.slg_layers:
+                    if block_idx in slg_layers:
                         continue
                     x = block(x, context, t_mod, freqs)
                 self.previous_residual_even = x - ori_x
@@ -398,7 +398,7 @@ class WanDiT(PreTrainedModel):
             else:
                 ori_x = x.clone()
                 for block_idx, block in enumerate(self.blocks):
-                    if block_idx in self.slg_layers:
+                    if block_idx in slg_layers:
                         continue
                     x = block(x, context, t_mod, freqs)
                 self.previous_residual_odd = x - ori_x
