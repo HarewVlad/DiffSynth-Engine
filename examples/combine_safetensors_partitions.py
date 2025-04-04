@@ -4,102 +4,109 @@ import torch
 import os
 import argparse
 import re
+import sys
+from collections import defaultdict
 
 def main():
-    # Parse command-line arguments
-    parser = argparse.ArgumentParser(description='Combine partitioned safetensors model files into a single file.')
-    parser.add_argument('--input-dir', type=str, required=True, help='Directory containing the model files')
-    parser.add_argument('--output-path', type=str, help='Path to save the combined model (default: INPUT_DIR/model.safetensors)')
-    parser.add_argument('--file-pattern', type=str, default='diffusion_pytorch_model-', help='Pattern to match for model files')
-    parser.add_argument('--num-partitions', type=int, help='Number of partitions (if not specified, detect automatically)')
+    parser = argparse.ArgumentParser(description='Combine partitioned safetensors model files.')
+    parser.add_argument('--input-dir', type=str, required=True, help='Directory containing partition files')
+    parser.add_argument('--output-path', type=str, help='Output file path (default: INPUT_DIR/model.safetensors)')
+    parser.add_argument('--file-pattern', type=str, default='model-', help='Prefix pattern for partition files')
+    parser.add_argument('--num-partitions', type=int, help='Expected number of partitions (optional, auto-detects)')
     parser.add_argument('--force', action='store_true', help='Overwrite output file if it exists')
     args = parser.parse_args()
 
-    # Set output path if not specified
-    if not args.output_path:
-        args.output_path = os.path.join(args.input_dir, "model.safetensors")
-    
-    # Check if output file exists
-    if os.path.exists(args.output_path) and not args.force:
-        print(f"Error: Output file {args.output_path} already exists. Use --force to overwrite.")
-        return
+    output_path = args.output_path or os.path.join(args.input_dir, "model.safetensors")
 
-    # Find all files matching the pattern
-    file_pattern_regex = f"{re.escape(args.file_pattern)}(\\d+)-of-(\\d+)\\.safetensors"
-    model_files = []
-    
-    # Get all safetensors files in the directory
-    for file in os.listdir(args.input_dir):
-        match = re.match(file_pattern_regex, file)
+    if os.path.exists(output_path) and not args.force:
+        print(f"Error: Output file {output_path} exists. Use --force to overwrite.", file=sys.stderr)
+        sys.exit(1)
+
+    file_pattern_regex = re.compile(rf"^{re.escape(args.file_pattern)}(\d+)-of-(\d+)\.safetensors$")
+    partitions = {}
+    detected_totals = set()
+
+    try:
+        filenames = os.listdir(args.input_dir)
+    except FileNotFoundError:
+        print(f"Error: Input directory not found: {args.input_dir}", file=sys.stderr)
+        sys.exit(1)
+    except OSError as e:
+        print(f"Error accessing input directory {args.input_dir}: {e}", file=sys.stderr)
+        sys.exit(1)
+
+
+    for filename in filenames:
+        match = file_pattern_regex.match(filename)
         if match:
-            partition_num = int(match.group(1))
-            total_partitions = int(match.group(2))
-            file_path = os.path.join(args.input_dir, file)
-            model_files.append((file_path, partition_num, total_partitions))
-    
-    if not model_files:
-        print(f"Error: No files matching pattern '{args.file_pattern}*-of-*.safetensors' found in {args.input_dir}")
-        return
+            part_num = int(match.group(1))
+            total_num = int(match.group(2))
+            if part_num in partitions:
+                 print(f"Warning: Duplicate partition number {part_num} found ({filename} and {os.path.basename(partitions[part_num])}). Using {filename}.", file=sys.stderr)
+            partitions[part_num] = os.path.join(args.input_dir, filename)
+            detected_totals.add(total_num)
 
-    # Check if all files mention the same total number of partitions
-    total_partitions_set = set(total for _, _, total in model_files)
-    if len(total_partitions_set) > 1:
-        print(f"Warning: Inconsistent total partition counts found: {total_partitions_set}")
-    
-    total_partitions = next(iter(total_partitions_set))
-    
-    # Check if specified number of partitions matches detected number
-    if args.num_partitions:
-        if args.num_partitions != total_partitions:
-            print(f"Warning: Specified number of partitions ({args.num_partitions}) differs from detected ({total_partitions})")
-        total_partitions = args.num_partitions
+    if not partitions:
+        print(f"Error: No files matching pattern '{args.file_pattern}*-of-*.safetensors' found in {args.input_dir}", file=sys.stderr)
+        sys.exit(1)
 
-    # Check if all expected partitions are present
-    partition_nums = set(partition for _, partition, _ in model_files)
-    expected_partitions = set(range(1, total_partitions + 1))
-    missing_partitions = expected_partitions - partition_nums
-    
+    if len(detected_totals) > 1:
+        print(f"Warning: Inconsistent total partition counts found in filenames: {detected_totals}", file=sys.stderr)
+
+    detected_total = next(iter(detected_totals)) if detected_totals else 0
+    final_total_partitions = args.num_partitions or detected_total
+
+    if args.num_partitions and args.num_partitions != detected_total and detected_totals:
+         print(f"Warning: Specified partition count ({args.num_partitions}) differs from detected ({detected_total})", file=sys.stderr)
+
+    if final_total_partitions <= 0:
+         print(f"Error: Could not determine total number of partitions. Please specify with --num-partitions.", file=sys.stderr)
+         sys.exit(1)
+
+    expected_partitions = set(range(1, final_total_partitions + 1))
+    found_partitions = set(partitions.keys())
+    missing_partitions = expected_partitions - found_partitions
+    extra_partitions = found_partitions - expected_partitions
+
     if missing_partitions:
-        print(f"Error: Missing partitions: {missing_partitions}")
-        return
+        print(f"Error: Missing partitions: {sorted(list(missing_partitions))}", file=sys.stderr)
+        sys.exit(1)
+    if extra_partitions:
+         print(f"Warning: Found partitions numbered higher than expected total ({final_total_partitions}): {sorted(list(extra_partitions))}", file=sys.stderr)
+         # Decide whether to proceed or exit; currently proceeds using expected range
 
-    # Sort files by partition number
-    model_files.sort(key=lambda x: x[1])  # Sort by partition number
-    
-    # Extract just the file paths after sorting
-    model_file_paths = [file_path for file_path, _, _ in model_files]
+    sorted_partition_files = [partitions[i] for i in range(1, final_total_partitions + 1)]
 
-    print(f"Found {len(model_files)} partition files out of {total_partitions} expected")
-    
-    # Load and combine all tensor dictionaries
+    print(f"Found {len(found_partitions)} partition files. Combining {len(sorted_partition_files)} files for {final_total_partitions} total partitions.")
+
     combined_tensors = {}
-    total_keys = 0
-    for i, file_path in enumerate(model_file_paths, 1):
-        print(f"Loading file {i}/{len(model_file_paths)}: {os.path.basename(file_path)}")
+    total_keys_loaded = 0
+    for i, file_path in enumerate(sorted_partition_files, 1):
+        print(f"Loading file {i}/{len(sorted_partition_files)}: {os.path.basename(file_path)}")
         try:
             tensors = load_file(file_path)
-            # Add tensors to combined dictionary
-            for key, tensor in tensors.items():
-                if key in combined_tensors:
-                    print(f"Warning: Duplicate key {key} found. Overwriting.")
-                combined_tensors[key] = tensor
-            total_keys += len(tensors)
-            print(f"  Loaded {len(tensors)} tensors")
+            keys_in_file = set(tensors.keys())
+            duplicate_keys = keys_in_file.intersection(combined_tensors.keys())
+            if duplicate_keys:
+                 print(f"  Warning: Duplicate keys found: {duplicate_keys}. Overwriting.", file=sys.stderr)
+
+            combined_tensors.update(tensors)
+            total_keys_loaded += len(keys_in_file)
+            print(f"  Loaded {len(keys_in_file)} tensors")
         except Exception as e:
-            print(f"Error loading {file_path}: {e}")
-            return
+            print(f"Error loading {file_path}: {e}", file=sys.stderr)
+            sys.exit(1)
 
-    # Save the combined tensors
-    print(f"Saving combined model to {args.output_path}")
+    print(f"Saving combined model ({len(combined_tensors)} unique tensors) to {output_path}")
     try:
-        os.makedirs(os.path.dirname(os.path.abspath(args.output_path)), exist_ok=True)
-        save_file(combined_tensors, args.output_path)
-        print(f"Successfully saved combined model with {len(combined_tensors)} tensors (from total of {total_keys} tensors in partitions)")
+        os.makedirs(os.path.dirname(output_path) or '.', exist_ok=True)
+        save_file(combined_tensors, output_path)
+        print(f"Successfully saved combined model.")
     except Exception as e:
-        print(f"Error saving combined model: {e}")
-        return
+        print(f"Error saving combined model: {e}", file=sys.stderr)
+        sys.exit(1)
 
-    print("Done!")
+    print("Done.")
 
 if __name__ == "__main__":
     main()
