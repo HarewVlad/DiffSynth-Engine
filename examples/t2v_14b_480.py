@@ -16,9 +16,10 @@ num_frames = 81
 teacache_thresh = 0.2
 
 pipe = WanVideoPipeline.from_pretrained(config, device="cuda", num_inference_steps=num_inference_steps, teacache_thresh=teacache_thresh)
+pipe.load_lora(lora_path="/root/detailz.safetensors", lora_scale=1.0)
 
 video = pipe(
-    prompt="Summer beach vacation style, a white cat wearing sunglasses sits on a surfboard. The fluffy-furred feline gazes directly at the camera with a relaxed expression. Blurred beach scenery forms the background featuring crystal-clear waters, distant green hills, and a blue sky dotted with white clouds. The cat assumes a naturally relaxed posture, as if savoring the sea breeze and warm sunlight. A close-up shot highlights the feline's intricate details and the refreshing atmosphere of the seaside.",
+    prompt="A charming plasticine raccoon, detailed with thumbprint textures and wide, curious eyes, holding a tiny red berry. // Scene: On an enchanted forest floor beside oversized, bioluminescent flowers pulsing with soft pastel light, dappled sunlight filters through a dense, vibrant canopy, magical dust motes drift gently. // Action: The raccoon tentatively reaches out a paw, gently touching a large, glowing petal, its head tilted in fascination as the flower emits a brighter pulse of light, whiskers twitching slightly. // Camera: Smooth cinematic camera orbit around the subject combined with fluid motion maintaining steady distance, medium shot, shallow depth of field.",
     num_frames=num_frames,
     width=width,
     height=height,
