@@ -14,6 +14,7 @@ from diffsynth_engine.utils.constants import (
     WAN_DIT_14B_I2V_CONFIG_FILE,
     WAN_DIT_14B_T2V_CONFIG_FILE,
 )
+from diffsynth_engine.utils.fp8_linear import fp8_inference
 
 
 def attention(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, num_heads: int):
@@ -387,20 +388,24 @@ class WanDiT(PreTrainedModel):
                 x += self.previous_residual_even
             else:
                 ori_x = x.clone()
-                for block_idx, block in enumerate(self.blocks):
-                    if block_idx in slg_layers:
-                        continue
-                    x = block(x, context, t_mod, freqs)
+
+                with fp8_inference():
+                    for block_idx, block in enumerate(self.blocks):
+                        if block_idx in slg_layers:
+                            continue
+                        x = block(x, context, t_mod, freqs)
                 self.previous_residual_even = x - ori_x
         else:
             if not should_calc_odd:
                 x += self.previous_residual_odd
             else:
                 ori_x = x.clone()
-                for block_idx, block in enumerate(self.blocks):
-                    if block_idx in slg_layers:
-                        continue
-                    x = block(x, context, t_mod, freqs)
+
+                with fp8_inference():
+                    for block_idx, block in enumerate(self.blocks):
+                        if block_idx in slg_layers:
+                            continue
+                        x = block(x, context, t_mod, freqs)
                 self.previous_residual_odd = x - ori_x
         #
 

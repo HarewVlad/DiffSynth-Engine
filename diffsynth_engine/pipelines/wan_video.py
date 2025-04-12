@@ -21,7 +21,6 @@ from diffsynth_engine.utils.constants import WAN_TOKENIZER_CONF_PATH
 from diffsynth_engine.utils.download import fetch_model
 from diffsynth_engine.utils.loader import load_file
 from diffsynth_engine.utils.parallel import ParallelModel
-from diffsynth_engine.utils.fp8_linear import fp8_inference
 
 
 logger = logging.getLogger(__name__)
@@ -300,16 +299,14 @@ class WanVideoPipeline(BasePipeline):
     def predict_noise(self, latents, image_clip_feature, image_y, timestep, context, slg_layers = []):
         latents = latents.to(dtype=self.config.dit_dtype, device=self.device)
 
-        with fp8_inference():
-            noise_pred = self.dit(
-                x=latents,
-                timestep=timestep,
-                context=context,
-                clip_feature=image_clip_feature,
-                y=image_y,
-                slg_layers=slg_layers,
-            )
-        return noise_pred
+        return self.dit(
+            x=latents,
+            timestep=timestep,
+            context=context,
+            clip_feature=image_clip_feature,
+            y=image_y,
+            slg_layers=slg_layers,
+        )
 
     def prepare_latents(
         self,
