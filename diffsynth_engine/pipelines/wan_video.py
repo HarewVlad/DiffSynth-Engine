@@ -56,39 +56,53 @@ class WanModelConfig:
 
 
 class WanLoRAConverter(LoRAStateDictConverter):
-    def from_diffusion(self, state_dict):
+    def _from_diffsynth(self, state_dict):
         dit_dict = {}
         for key, param in state_dict.items():
             lora_args = {}
+            if ".lora_A.default.weight" not in key:
+                continue
+
+            lora_args["up"] = state_dict[key.replace(".lora_A.default.weight", ".lora_B.default.weight")]
+            lora_args["down"] = param
+            lora_args["rank"] = lora_args["up"].shape[1]
+            if key.replace(".lora_A.default.weight", ".alpha") in state_dict:
+                lora_args["alpha"] = state_dict[key.replace(".lora_A.default.weight", ".alpha")]
+            else:
+                lora_args["alpha"] = lora_args["rank"]
+            key = key.replace(".lora_A.default.weight", "")
+            dit_dict[key] = lora_args
+
+        return {"dit": dit_dict}
+
+    def _from_civitai(self, state_dict):
+        dit_dict = {}
+        for key, param in state_dict.items():
             if ".lora_A.weight" not in key:
                 continue
 
-            lora_b_key = key.replace(".lora_A.weight", ".lora_B.weight")
-            if lora_b_key not in state_dict:
-                continue
-
+            lora_args = {}
+            lora_args["up"] = state_dict[key.replace(".lora_A.weight", ".lora_B.weight")]
             lora_args["down"] = param
-            lora_args["up"] = state_dict[lora_b_key]
             lora_args["rank"] = lora_args["up"].shape[1]
-
-            # Check for alpha, use rank as default
-            alpha_key = key.replace(".lora_A.weight", ".alpha")
-            if alpha_key in state_dict:
-                lora_args["alpha"] = state_dict[alpha_key]
+            if key.replace(".lora_A.weight", ".alpha") in state_dict:
+                lora_args["alpha"] = state_dict[key.replace(".lora_A.weight", ".alpha")]
             else:
                 lora_args["alpha"] = lora_args["rank"]
+            key = key.replace("diffusion_model.", "").replace(".lora_A.weight", "")
+            dit_dict[key] = lora_args
 
-            # Extract the base key without the lora suffix and remove diffusion_model prefix
-            base_key = key.replace(".lora_A.weight", "")
-            if base_key.startswith("diffusion_model."):
-                base_key = base_key[len("diffusion_model."):]
-
-            dit_dict[base_key] = lora_args
 
         return {"dit": dit_dict}
 
     def convert(self, state_dict):
-        return self.from_diffusion(state_dict)
+        if "diffusion_model.blocks.0.cross_attn.k.lora_A.weight" in state_dict:
+            state_dict = self._from_civitai(state_dict)
+            logger.info("Use Civitai format for lora")
+        else:
+            state_dict = self._from_diffsynth(state_dict)
+            logger.info("Use DiffSynth format for lora")
+        return state_dict
 
 
 class WanVideoPipeline(BasePipeline):
