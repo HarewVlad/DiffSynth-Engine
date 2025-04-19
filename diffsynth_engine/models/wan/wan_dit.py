@@ -103,12 +103,74 @@ class SelfAttention(nn.Module):
         self.norm_q = RMSNorm(dim, eps=eps, device=device, dtype=dtype)
         self.norm_k = RMSNorm(dim, eps=eps, device=device, dtype=dtype)
 
-    def forward(self, x, freqs):
+    def get_feta_scores(self, query, key, num_heads, weight, num_frames):
+        img_q, img_k = query, key
+
+        # After rope_apply, tensors have shape [B, S, flattened_dimension]
+        B, S, flattened_dim = img_q.shape
+
+        # We need to reshape back to [B, S, N, C]
+        N = num_heads  # Use the number of heads from the class
+        C = flattened_dim // N  # Calculate head dimension
+
+        # Calculate spatial dimension
+        spatial_dim = S // num_frames
+
+        # Reshape to 4D tensors
+        img_q = img_q.reshape(B, S, N, C)
+        img_k = img_k.reshape(B, S, N, C)
+
+        # Add time dimension between spatial and head dims
+        query_image = img_q.reshape(B, spatial_dim, num_frames, N, C)
+        key_image = img_k.reshape(B, spatial_dim, num_frames, N, C)
+
+        # Expand time dimension
+        query_image = query_image.expand(-1, -1, num_frames, -1, -1)  # [B, spatial_dim, T, N, C]
+        key_image = key_image.expand(-1, -1, num_frames, -1, -1)      # [B, spatial_dim, T, N, C]
+
+        # Reshape to match feta_score input format: [(B spatial_dim) N T C]
+        query_image = rearrange(query_image, "b s t n c -> (b s) n t c")
+        key_image = rearrange(key_image, "b s t n c -> (b s) n t c")
+
+        return self.feta_score(query_image, key_image, C, weight, num_frames)
+
+    @torch.compiler.disable()
+    def feta_score(self, query_image, key_image, head_dim, weight, num_frames):
+        scale = head_dim**-0.5
+        query_image = query_image * scale
+        attn_temp = query_image @ key_image.transpose(-2, -1)
+        attn_temp = attn_temp.to(torch.float32)
+        attn_temp = attn_temp.softmax(dim=-1)
+
+        # Reshape to [batch_size * num_tokens, num_frames, num_frames]
+        attn_temp = attn_temp.reshape(-1, num_frames, num_frames)
+
+        # Create a mask for diagonal elements
+        diag_mask = torch.eye(num_frames, device=attn_temp.device).bool()
+        diag_mask = diag_mask.unsqueeze(0).expand(attn_temp.shape[0], -1, -1)
+
+        # Zero out diagonal elements
+        attn_wo_diag = attn_temp.masked_fill(diag_mask, 0)
+
+        # Calculate mean for each token's attention matrix
+        # Number of off-diagonal elements per matrix is n*n - n
+        num_off_diag = num_frames * num_frames - num_frames
+        mean_scores = attn_wo_diag.sum(dim=(1, 2)) / num_off_diag
+
+        enhance_scores = mean_scores.mean() * (num_frames + weight)
+        enhance_scores = enhance_scores.clamp(min=1)
+        return enhance_scores
+
+    def forward(self, x, freqs, num_frames):
         q = self.norm_q(self.q(x))
         k = self.norm_k(self.k(x))
         v = self.v(x)
         num_heads = q.shape[2] // self.head_dim
-        x = attention(q=rope_apply(q, freqs, num_heads), k=rope_apply(k, freqs, num_heads), v=v, num_heads=num_heads)
+        q = rope_apply(q, freqs, num_heads)
+        k = rope_apply(k, freqs, num_heads)
+        feta_scores = self.get_feta_scores(q, k, num_heads, 2.0, (num_frames - 1) // 4 + 1)  # WARNING: Don't forget to modify in case of FLF2V-14B
+        x = attention(q=q, k=k, v=v, num_heads=num_heads)
+        x *= feta_scores
         return self.o(x)
 
 
@@ -187,11 +249,11 @@ class DiTBlock(nn.Module):
         )
         self.modulation = nn.Parameter(torch.randn(1, 6, dim, device=device, dtype=dtype) / dim**0.5)
 
-    def forward(self, x, context, t_mod, freqs):
+    def forward(self, x, context, t_mod, freqs, num_frames):
         # msa: multi-head self-attention  mlp: multi-layer perceptron
         shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = (self.modulation + t_mod).chunk(6, dim=1)
         input_x = modulate(self.norm1(x), shift_msa, scale_msa)
-        x = x + gate_msa * self.self_attn(input_x, freqs)
+        x = x + gate_msa * self.self_attn(input_x, freqs, num_frames)
         x = x + self.cross_attn(self.norm3(x), context)
         input_x = modulate(self.norm2(x), shift_mlp, scale_mlp)
         x = x + gate_mlp * self.ffn(input_x)
@@ -326,6 +388,7 @@ class WanDiT(PreTrainedModel):
         x: torch.Tensor,
         context: torch.Tensor,
         timestep: torch.Tensor,
+        num_frames: int,
         clip_feature: Optional[torch.Tensor] = None,  # clip_vision_encoder(img)
         y: Optional[torch.Tensor] = None,  # vae_encoder(img)
         slg_layers: Optional[list[int]] = [],
@@ -393,7 +456,7 @@ class WanDiT(PreTrainedModel):
                     for block_idx, block in enumerate(self.blocks):
                         if block_idx in slg_layers:
                             continue
-                        x = block(x, context, t_mod, freqs)
+                        x = block(x, context, t_mod, freqs, num_frames)
                 self.previous_residual_even = x - ori_x
         else:
             if not should_calc_odd:
@@ -405,7 +468,7 @@ class WanDiT(PreTrainedModel):
                     for block_idx, block in enumerate(self.blocks):
                         if block_idx in slg_layers:
                             continue
-                        x = block(x, context, t_mod, freqs)
+                        x = block(x, context, t_mod, freqs, num_frames)
                 self.previous_residual_odd = x - ori_x
         #
 

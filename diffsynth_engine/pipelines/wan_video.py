@@ -236,6 +236,7 @@ class WanVideoPipeline(BasePipeline):
         batch_cfg: bool,
         use_cfg_zero_star: bool,
         slg_layers: list[int],
+        num_frames: int,
     ):
         if cfg_scale <= 1.0:
             return self.predict_noise(
@@ -244,6 +245,7 @@ class WanVideoPipeline(BasePipeline):
                 image_y=image_y,
                 timestep=timestep,
                 context=positive_prompt_emb,
+                num_frames=num_frames,
             )
         if not batch_cfg:
             # cfg by predict noise one by one
@@ -253,6 +255,7 @@ class WanVideoPipeline(BasePipeline):
                 image_y=image_y,
                 timestep=timestep,
                 context=positive_prompt_emb,
+                num_frames=num_frames,
             )
             negative_noise_pred = self.predict_noise(
                 latents=latents,
@@ -261,6 +264,7 @@ class WanVideoPipeline(BasePipeline):
                 timestep=timestep,
                 context=negative_prompt_emb,
                 slg_layers=slg_layers,
+                num_frames=num_frames,
             )
             noise_pred = negative_noise_pred + cfg_scale * (positive_noise_pred - negative_noise_pred)
             return noise_pred
@@ -279,6 +283,7 @@ class WanVideoPipeline(BasePipeline):
                 image_y=image_y,
                 timestep=timestep,
                 context=prompt_emb,
+                num_frames=num_frames,
             )
             # https://github.com/WeichenFan/CFG-Zero-star
             if use_cfg_zero_star:
@@ -296,7 +301,7 @@ class WanVideoPipeline(BasePipeline):
             noise_pred = negative_noise_pred + cfg_scale * (positive_noise_pred - negative_noise_pred)
             return noise_pred
 
-    def predict_noise(self, latents, image_clip_feature, image_y, timestep, context, slg_layers = []):
+    def predict_noise(self, latents, image_clip_feature, image_y, timestep, context, num_frames, slg_layers = []):
         latents = latents.to(dtype=self.config.dit_dtype, device=self.device)
 
         return self.dit(
@@ -306,6 +311,7 @@ class WanVideoPipeline(BasePipeline):
             clip_feature=image_clip_feature,
             y=image_y,
             slg_layers=slg_layers,
+            num_frames=num_frames,
         )
 
     def prepare_latents(
@@ -422,6 +428,7 @@ class WanVideoPipeline(BasePipeline):
                 batch_cfg=self.batch_cfg,
                 use_cfg_zero_star=use_cfg_zero_star,
                 slg_layers=current_slg_layers,
+                num_frames=num_frames,
             )
             # Scheduler
             latents = self.sampler.step(latents, noise_pred, i)
