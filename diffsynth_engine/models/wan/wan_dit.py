@@ -168,9 +168,9 @@ class SelfAttention(nn.Module):
         num_heads = q.shape[2] // self.head_dim
         q = rope_apply(q, freqs, num_heads)
         k = rope_apply(k, freqs, num_heads)
-        feta_scores = self.get_feta_scores(q, k, num_heads, 2.0, (num_frames - 1) // 4 + 1)  # WARNING: Don't forget to modify in case of FLF2V-14B
+        # feta_scores = self.get_feta_scores(q, k, num_heads, 2.0, (num_frames - 1) // 4 + 1)  # WARNING: Don't forget to modify in case of FLF2V-14B
         x = attention(q=q, k=k, v=v, num_heads=num_heads)
-        x *= feta_scores
+        # x *= feta_scores
         return self.o(x)
 
 
