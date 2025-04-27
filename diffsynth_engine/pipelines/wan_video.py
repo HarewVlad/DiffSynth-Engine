@@ -188,6 +188,11 @@ class WanVideoPipeline(BasePipeline):
         image = self.preprocess_image(image.resize((width, height), Image.Resampling.LANCZOS)).to(
             self.device, self.config.image_encoder_dtype
         )
+
+        # Drop alpha channel
+        if image.shape[0] == 4:
+            image = image[:3, :, :]
+
         clip_context = self.image_encoder.encode_image([image])
         msk = torch.ones(
             1, num_frames, height // 8, width // 8, device=self.device, dtype=self.config.image_encoder_dtype

@@ -480,6 +480,11 @@ class WanImageEncoder(PreTrainedModel):
                 for u in videos
             ]
         )
+
+        # Drop alpha channel
+        if videos.shape[1] == 4:
+            videos = videos[:, :3, :, :]  # Drop the alpha channel
+
         videos = self.transforms.transforms[-1](videos.mul_(0.5).add_(0.5))
 
         # forward
